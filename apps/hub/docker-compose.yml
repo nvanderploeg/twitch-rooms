@@ -1,0 +1,30 @@
+# Hub stack — OPERATOR-RUN.
+#
+# Unlike the Room Server (which a Streamer self-hosts), the Hub is run by the
+# project operator: one Hub serves many Rooms. It is a directory + redirect
+# service and carries NO live Room traffic (ADR-0001).
+#
+# The Hub image is built from the REPO ROOT context (it needs the pnpm workspace
+# + @twitch-room/protocol), so `context` points two levels up.
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: apps/hub/Dockerfile
+    env_file: .env
+    ports:
+      - '${PORT:-8080}:8080'
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hub}
+      POSTGRES_DB: ${POSTGRES_DB:-hub}
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    restart: unless-stopped

@@ -1,0 +1,27 @@
+# Room Server stack — a Streamer self-hosts this (ADR-0001).
+#
+# There is intentionally NO database service: the Room Server uses embedded
+# SQLite (ADR-0004). "Persistent data" is the host-mounted file ./data/room.db
+# (created on first boot); back it up by copying that file.
+#
+# The Streamer is responsible for the Public Endpoint's DNS + TLS in front of
+# this container (a reverse proxy / tunnel terminating wss://). The browser will
+# refuse a bare ws:// or untrusted cert (ADR-0001).
+
+services:
+  room-server:
+    build:
+      # Build context is the monorepo root so workspace deps resolve.
+      context: ../..
+      dockerfile: apps/room-server/Dockerfile
+    env_file: .env
+    environment:
+      # Persistent data lives on the host bind mount below.
+      DATA_DIR: /data
+    ports:
+      # Host:container. Front this with your TLS reverse proxy.
+      - "${PORT:-8080}:8080"
+    volumes:
+      # The SQLite database (and WAL files) persist here on the host.
+      - ./data:/data
+    restart: unless-stopped

@@ -1,8 +1,17 @@
-// Importing from the shared protocol package proves the workspace link resolves.
-import { PROTOCOL_VERSION } from '@twitch-room/protocol';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { RoomView } from './components/RoomView.js';
+import { AdminPanel } from './components/AdminPanel.js';
 
-// NOTE: rendering engine is PixiJS (ADR-0003). The real Engine that reads the
-// Room Config and runs Modules replaces this placeholder component.
+// The Engine client: `/` renders the Viewer scene (RoomView), `/admin` the
+// streamer config panel. Routing lives here so <App /> is self-contained for
+// tests; main.tsx just renders it.
 export function App() {
-  return <h1 data-protocol-version={PROTOCOL_VERSION}>Twitch Room — web client</h1>;
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<RoomView />} />
+        <Route path="/admin" element={<AdminPanel />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }

@@ -1,5 +1,7 @@
 # Twitch Room
 
+Vibe code experiment, use at your own risk
+
 A web service where a Twitch **Streamer**'s **Viewers** gather in a shared, configurable
 virtual **Room** and experience chat together. The project ships the _harness_ — the Room is
 configurable in looks and functionality, not a single fixed game.

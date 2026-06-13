@@ -17,15 +17,15 @@ The shared virtual space for one Streamer and their Viewers — the thing being 
 _Avoid_: Channel, world, lobby, space.
 
 **Room Server**:
-The software a Streamer runs locally (the docker-compose stack) that owns the authoritative state of one Room. It is reachable by Viewers at a **Public Endpoint**, and Viewers connect to it directly — the Hub is not in the data path.
+The software a Streamer runs locally (the docker-compose stack) that owns the authoritative state of one Room. It is reachable by Viewers at a **Public Endpoint**, where it serves both the web client (React app + assets) and the live `wss://` data — same origin. Viewers connect to it directly; the Hub is not in the data path.
 _Avoid_: Backend, node, instance.
 
 **Public Endpoint**:
-The publicly-reachable, TLS-secured URL at which a Room Server accepts direct Viewer connections (e.g. `wss://alice.example`). Provided by the Streamer's host — whether a bundled tunnel, port-forward, or VPS is an open decision.
+The publicly-reachable, TLS-secured URL at which a Room Server accepts direct Viewer connections (e.g. `wss://room.alicestreams.tv`). The Streamer owns it — their own DNS, TLS, and reachability (VPS, port-forward, or self-run tunnel). The Room Server registers this URL with the Hub on boot.
 _Avoid_: URL, address, host.
 
 **Hub**:
-The single public service Viewers visit first. It is a **directory**: it tracks which Rooms exist, their presence (online/offline), and each Room's Public Endpoint, then sends the Viewer on to connect directly to the Room Server. The Hub is NOT a relay and carries no live Room traffic. One Hub serves many Rooms.
+The single public service Viewers visit first. It is a **directory**: it tracks which Rooms exist, their presence (online/offline), and each Room's Public Endpoint, then **redirects** the Viewer to that endpoint. The Hub serves no client assets and carries no live Room traffic — once it redirects, it is out of the loop. One Hub serves many Rooms.
 _Avoid_: Gateway, proxy, relay, broker.
 
 ## Flagged ambiguities

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Twitch Room — a shared, configurable virtual room where a Streamer's Viewers gather.",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "packageManager": "pnpm@11.5.2",
   "scripts": {

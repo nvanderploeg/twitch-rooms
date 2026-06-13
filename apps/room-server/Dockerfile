@@ -7,7 +7,7 @@
 # Persistent data is NOT in the image: the SQLite file lives at ${DATA_DIR}/room.db
 # on a host bind mount (ADR-0004). See docker-compose.yml.
 
-FROM node:22-slim AS base
+FROM node:24-slim AS base
 WORKDIR /app
 ENV NODE_ENV=production
 

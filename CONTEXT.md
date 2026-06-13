@@ -9,12 +9,15 @@ The broadcaster who owns a Room and runs the room software locally. One Streamer
 _Avoid_: Host, broadcaster, creator.
 
 **Viewer**:
-A member of the Streamer's audience who joins the Room through a web browser. Many Viewers per Room.
+A member of the Streamer's audience who joins the Room through a web browser. Many Viewers per Room. A Viewer watches anonymously by default (the scene is chat-driven, ingested via the Streamer's OAuth). A Viewer may optionally log in with Twitch to **claim** their avatar and gain web-side agency; an anonymous Viewer is watch-only.
 _Avoid_: User, guest, member.
 
 **Room**:
-The shared virtual space for one Streamer and their Viewers — the thing being rendered, configured, and inhabited. A Room is a logical space; the **Room Server** is the software instance that runs it.
+The shared virtual space for one Streamer and their Viewers — the thing being rendered, configured, and inhabited. A Room corresponds one-to-one to a Twitch channel; the Hub identifies it by the channel's Twitch login (`hub.site/alice` ↔ `twitch.tv/alice`). A Room is a logical space; the **Room Server** is the software instance that runs it.
 _Avoid_: Channel, world, lobby, space.
+
+**Twitch OAuth (Streamer)**:
+The Streamer authenticates with Twitch to prove they own their channel. This both authorizes the Room Server's registration with the Hub (no impersonation/squatting) and grants the scopes needed to read the channel's chat. The Hub's directory key is the verified Twitch login.
 
 **Room Server**:
 The software a Streamer runs locally (the docker-compose stack) that owns the authoritative state of one Room. It is reachable by Viewers at a **Public Endpoint**, where it serves both the web client (React app + assets) and the live `wss://` data — same origin. Viewers connect to it directly; the Hub is not in the data path.

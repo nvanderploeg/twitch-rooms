@@ -51,7 +51,7 @@ export interface AvatarState {
   userId: string;
   displayName: string;
   color?: ChatColor;
-  /** Position within the scene, in scene units. */
+  /** Normalized scene position in [0, 1]; the client scales to its canvas. */
   x: number;
   y: number;
   /** True while a logged-in Viewer actively controls this avatar. */

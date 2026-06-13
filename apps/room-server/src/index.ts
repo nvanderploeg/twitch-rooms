@@ -21,7 +21,7 @@ import fastifyStatic from '@fastify/static';
 import { PROTOCOL_VERSION, type ChatMessage } from '@twitch-room/protocol';
 
 import { config } from './config.js';
-import { loadConfig as loadRoomConfig, migrate, openDb } from './db.js';
+import { loadConfig as loadRoomConfig, migrate, openDb, recordClaim } from './db.js';
 import { Room } from './room.js';
 import { WsHub } from './net/ws.js';
 import { configRoutes } from './routes/config.js';
@@ -39,8 +39,8 @@ async function main(): Promise<void> {
   migrate();
   const roomConfig = loadRoomConfig();
 
-  // 2. The authoritative Room.
-  const room = new Room(roomConfig);
+  // 2. The authoritative Room. Claims are persisted to SQLite for reconnect.
+  const room = new Room(roomConfig, { persistClaim: recordClaim });
 
   // 3. HTTP + WebSocket server.
   const app = Fastify({ logger: true });
@@ -51,6 +51,12 @@ async function main(): Promise<void> {
   ws.register(app);
   oauthRoutes(app);
   configRoutes(app, room, ws);
+
+  // Whenever Room state changes (chat spawns, moves, idle despawns, config
+  // edits), push a fresh full snapshot to every connected Viewer.
+  room.onChange(() => {
+    ws.broadcast({ type: 'state', state: room.snapshot() });
+  });
 
   // Serve the built web client at the same origin. If the dist is missing
   // (e.g. running the server without building the client), fall back to a tiny
@@ -69,16 +75,21 @@ async function main(): Promise<void> {
     });
   }
 
-  // 4. Chat pipeline: chat -> avatar -> broadcast(chat event + state snapshot).
+  // 4. Chat pipeline: chat -> avatar -> broadcast the chat event. The resulting
+  // state snapshot is broadcast by the room.onChange subscription above.
   const onChat = (msg: ChatMessage): void => {
     room.applyChat(msg);
     ws.broadcast({ type: 'chat', message: msg });
-    ws.broadcast({ type: 'state', state: room.snapshot() });
   };
   const chatSource: ChatSource = config.mockChat
     ? new MockChatSource(onChat)
     : new EventSubChatSource(onChat);
   await chatSource.start();
+
+  // Idle-despawn sweep: drop avatars that have gone quiet (see Room.tick). Runs
+  // on a short interval; unref'd so it never keeps the process alive on its own.
+  const ticker = setInterval(() => room.tick(Date.now()), 1_000);
+  ticker.unref();
 
   // 5. Directory presence: register with the Hub then heartbeat (non-blocking).
   const hub = new HubClient();
@@ -87,6 +98,7 @@ async function main(): Promise<void> {
   // 6. Graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info(`[room-server] received ${signal}, shutting down`);
+    clearInterval(ticker);
     chatSource.stop();
     hub.stop();
     await app.close();

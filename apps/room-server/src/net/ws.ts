@@ -70,6 +70,10 @@ export class WsHub {
       });
 
       socket.on('close', () => {
+        // Release the claim so the avatar can idle-despawn like any other.
+        if (conn.claimedUserId) {
+          this.room.releaseClaim(conn.claimedUserId);
+        }
         this.connections.delete(conn);
       });
 
@@ -89,8 +93,8 @@ export class WsHub {
         break;
       case 'action':
         if (conn.claimedUserId) {
+          // The resulting state snapshot is broadcast via room.onChange.
           this.room.applyAction(conn.claimedUserId, msg.action);
-          this.broadcast({ type: 'state', state: this.room.snapshot() });
         } else {
           this.sendError(conn, 'not_claimed', 'claim your avatar before acting');
         }

@@ -1,11 +1,8 @@
 // Importing from the shared protocol package proves the workspace link resolves.
-import type { Placeholder } from '@twitch-room/protocol';
+import { PROTOCOL_VERSION } from '@twitch-room/protocol';
 
-// TODO(decision pending): graphics/rendering engine for the Room (2D vs 3D) is
-// undecided — no rendering engine is wired up yet. For now this is plain text.
-
-const _placeholder: Placeholder = { type: 'placeholder' };
-
+// NOTE: rendering engine is PixiJS (ADR-0003). The real Engine that reads the
+// Room Config and runs Modules replaces this placeholder component.
 export function App() {
-  return <h1>Twitch Room — web client</h1>;
+  return <h1 data-protocol-version={PROTOCOL_VERSION}>Twitch Room — web client</h1>;
 }

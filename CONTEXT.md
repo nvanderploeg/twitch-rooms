@@ -31,6 +31,18 @@ _Avoid_: URL, address, host.
 The single public service Viewers visit first. It is a **directory**: it tracks which Rooms exist, their presence (online/offline), and each Room's Public Endpoint, then **redirects** the Viewer to that endpoint. The Hub serves no client assets and carries no live Room traffic — once it redirects, it is out of the loop. One Hub serves many Rooms.
 _Avoid_: Gateway, proxy, relay, broker.
 
+**Room Config**:
+The declarative document that defines a Room's looks and functionality — theme, scene/layout, asset references, and the set of **Modules** it enables with their parameters. Interpreted by a fixed engine shared by all Rooms; in v1 it runs only built-in behavior, no third-party code.
+_Avoid_: Settings, preferences, manifest.
+
+**Module**:
+A built-in, configurable feature unit the engine can run in a Room (e.g. avatars, emote-rain, polls, mini-games). A Room turns Modules on and parametrizes them through its Room Config. v1 ships a curated set of Modules; third-party plugins are an explicit future extension, not a v1 surface.
+_Avoid_: Plugin, extension, widget, addon.
+
+**Engine**:
+The fixed client+room runtime, shared by every Room, that renders the scene and executes enabled Modules according to the Room Config. The Engine is the harness; Rooms differ by config, not by code.
+_Avoid_: Framework, runtime, core.
+
 ## Flagged ambiguities
 
 **Hub: directory, not relay.** Early discussion floated the Hub tunneling all Viewer traffic (room dials out, Hub fans out). Rejected. The Hub only does discovery/presence/routing; live Room traffic flows directly Viewer ↔ Room Server via the Public Endpoint. If you catch yourself describing the Hub carrying gameplay/chat bytes, you've drifted.

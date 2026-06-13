@@ -1,0 +1,22 @@
+{
+  "name": "twitch-room",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Twitch Room — a shared, configurable virtual room where a Streamer's Viewers gather.",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "typecheck": "pnpm -r typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}

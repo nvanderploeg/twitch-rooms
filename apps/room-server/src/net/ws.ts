@@ -17,6 +17,7 @@ import {
 } from '@twitch-room/protocol';
 
 import type { Room } from '../room.js';
+import { consumeClaimToken } from '../twitch/viewer-auth.js';
 
 /** Per-connection state we track alongside the raw socket. */
 interface Connection {
@@ -123,11 +124,22 @@ export class WsHub {
   }
 
   private onClaim(conn: Connection, token: string): void {
-    // TODO: validate `token` against the streamer-issued session/claim store
-    // (see twitch/oauth.ts) to resolve the Twitch userId + displayName. Until
-    // OAuth is wired, claims are rejected so we never bind an unverified user.
-    void token;
-    this.sendError(conn, 'claim_unverified', 'claim validation is not yet wired');
+    const identity = consumeClaimToken(token);
+    if (!identity) {
+      this.sendError(conn, 'claim_unverified', 'invalid or expired claim token');
+      return;
+    }
+    conn.claimedUserId = identity.userId;
+    this.room.claim(identity.userId, identity.displayName);
+    // Re-send welcome so the client learns its claimed identity (+ fresh state).
+    // room.claim's onChange separately broadcasts the new state to everyone.
+    this.send(conn, {
+      type: 'welcome',
+      protocolVersion: PROTOCOL_VERSION,
+      config: this.room.getConfig(),
+      state: this.room.snapshot(),
+      claimedUserId: conn.claimedUserId,
+    });
   }
 
   private send(conn: Connection, msg: ServerMessage): void {

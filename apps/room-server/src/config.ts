@@ -26,8 +26,10 @@ export interface Config {
   twitchClientId: string;
   /** Twitch application client secret (OAuth + Helix). */
   twitchClientSecret: string;
-  /** Registered Twitch OAuth redirect URI (must match the Twitch app config). */
+  /** Registered Twitch OAuth redirect URI for the Streamer login (must match the Twitch app config). */
   twitchRedirectUri: string;
+  /** Registered Twitch OAuth redirect URI for the Viewer (claim) login. */
+  twitchViewerRedirectUri: string;
   /** Directory for persistent data; the SQLite file lives at `${dataDir}/room.db`. */
   dataDir: string;
   /** Directory of the built web client served at the Public Endpoint origin. */
@@ -84,6 +86,13 @@ export function loadConfig(): Config {
   const requireTwitch = (name: string): string =>
     mockChat ? optEnv(name, '') : requireEnv(name);
 
+  const twitchRedirectUri = requireTwitch('TWITCH_REDIRECT_URI');
+  // The Viewer login uses a sibling callback path; default it by swapping the
+  // streamer callback path, or set TWITCH_VIEWER_REDIRECT_URI explicitly.
+  const twitchViewerRedirectUri =
+    optEnv('TWITCH_VIEWER_REDIRECT_URI', '') ||
+    twitchRedirectUri.replace('/auth/twitch/callback', '/auth/viewer/callback');
+
   return {
     port: intEnv('PORT', 8080),
     channel: requireEnv('CHANNEL').toLowerCase(),
@@ -92,7 +101,8 @@ export function loadConfig(): Config {
     registrationToken: requireEnv('REGISTRATION_TOKEN'),
     twitchClientId: requireTwitch('TWITCH_CLIENT_ID'),
     twitchClientSecret: requireTwitch('TWITCH_CLIENT_SECRET'),
-    twitchRedirectUri: requireTwitch('TWITCH_REDIRECT_URI'),
+    twitchRedirectUri,
+    twitchViewerRedirectUri,
     dataDir: optEnv('DATA_DIR', './data'),
     webDist: optEnv('WEB_DIST', defaultWebDist),
     mockChat,

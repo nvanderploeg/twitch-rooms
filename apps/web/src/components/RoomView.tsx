@@ -5,10 +5,11 @@ import { useRoom } from '../net/useRoom.js';
 /**
  * The Viewer-facing scene. Mounts a Pixi canvas, drives the {@link Engine} from
  * the live Room config/state/chat, and overlays connection status plus the
- * Twitch login affordance.
+ * Twitch login / claim affordance. Once the Viewer has claimed an avatar,
+ * clicking the scene moves it.
  */
 export function RoomView() {
-  const { status, config, state, lastChat, send: _send } = useRoom();
+  const { status, config, state, lastChat, claimedUserId, send } = useRoom();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -51,27 +52,49 @@ export function RoomView() {
   }, [lastChat]);
 
   function handleLogin() {
-    // TODO: redirect to the Room Server's Twitch login at /auth/twitch/login.
-    // window.location.href = '/auth/twitch/login';
+    window.location.href = '/auth/viewer/login';
   }
+
+  // When claimed, a click moves the avatar to the normalized click position.
+  function handleSceneClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!claimedUserId) {
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    send({ type: 'action', action: { kind: 'move', x, y } });
+  }
+
+  const claimedName = claimedUserId
+    ? (state?.avatars.find((a) => a.userId === claimedUserId)?.displayName ?? 'you')
+    : null;
 
   return (
     <div style={styles.root}>
-      <canvas ref={canvasRef} style={styles.canvas} />
+      <canvas
+        ref={canvasRef}
+        onClick={handleSceneClick}
+        style={{ ...styles.canvas, cursor: claimedUserId ? 'crosshair' : 'default' }}
+      />
       <div style={styles.overlay}>
         <header style={styles.header}>
           <h1 style={styles.title}>Twitch Room — web client</h1>
-          <button type="button" onClick={handleLogin} style={styles.loginButton}>
-            Log in with Twitch
-          </button>
+          {claimedName ? (
+            <span style={styles.claimed}>Controlling: {claimedName} · click to move</span>
+          ) : (
+            <button type="button" onClick={handleLogin} style={styles.loginButton}>
+              Log in with Twitch
+            </button>
+          )}
         </header>
         <div style={styles.status}>
           <StatusBadge status={status} />
-          {config ? (
-            <span> · {config.channel}</span>
-          ) : (
-            <span> · connecting to room…</span>
-          )}
+          {config ? <span> · {config.channel}</span> : <span> · connecting to room…</span>}
         </div>
       </div>
     </div>
@@ -101,5 +124,6 @@ const styles: Record<string, React.CSSProperties> = {
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 18, margin: 0 },
   loginButton: { pointerEvents: 'auto', cursor: 'pointer' },
+  claimed: { fontSize: 13, opacity: 0.9 },
   status: { fontSize: 13, opacity: 0.85 },
 };

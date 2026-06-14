@@ -26,6 +26,7 @@ import { Room } from './room.js';
 import { WsHub } from './net/ws.js';
 import { configRoutes } from './routes/config.js';
 import { getValidAccessToken, oauthRoutes } from './twitch/oauth.js';
+import { viewerAuthRoutes } from './twitch/viewer-auth.js';
 import { HubClient } from './hub-client.js';
 import {
   EventSubChatSource,
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
   const ws = new WsHub(room);
   ws.register(app);
   oauthRoutes(app);
+  viewerAuthRoutes(app);
   configRoutes(app, room, ws);
 
   // Whenever Room state changes (chat spawns, moves, idle despawns, config

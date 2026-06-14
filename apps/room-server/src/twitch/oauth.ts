@@ -218,13 +218,16 @@ export async function getValidAccessToken(): Promise<
 }
 
 /** Exchange an authorization code for tokens (grant_type=authorization_code). */
-async function exchangeCode(code: string): Promise<TokenResponse> {
+export async function exchangeCode(
+  code: string,
+  redirectUri: string = config.twitchRedirectUri,
+): Promise<TokenResponse> {
   const body = new URLSearchParams({
     client_id: config.twitchClientId,
     client_secret: config.twitchClientSecret,
     code,
     grant_type: 'authorization_code',
-    redirect_uri: config.twitchRedirectUri,
+    redirect_uri: redirectUri,
   });
   const res = await fetch(TWITCH_TOKEN_URL, {
     method: 'POST',
@@ -256,8 +259,10 @@ async function refreshToken(refresh: string): Promise<TokenResponse> {
   return (await res.json()) as TokenResponse;
 }
 
-/** Resolve the authenticated user's id + login via Helix /users. */
-async function fetchIdentity(accessToken: string): Promise<{ id: string; login: string }> {
+/** Resolve the authenticated user's id + login + display name via Helix /users. */
+export async function fetchIdentity(
+  accessToken: string,
+): Promise<{ id: string; login: string; displayName: string }> {
   const res = await fetch(HELIX_USERS_URL, {
     headers: {
       'Client-Id': config.twitchClientId,
@@ -272,5 +277,5 @@ async function fetchIdentity(accessToken: string): Promise<{ id: string; login: 
   if (!user) {
     throw new Error('helix /users returned no user');
   }
-  return { id: user.id, login: user.login };
+  return { id: user.id, login: user.login, displayName: user.display_name };
 }

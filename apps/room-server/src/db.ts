@@ -59,6 +59,30 @@ export function migrate(): void {
       claimed_at   INTEGER NOT NULL
     )
   `);
+  handle.exec(`
+    CREATE TABLE IF NOT EXISTS twitch_auth (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      access_token  TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      user_id       TEXT NOT NULL,
+      login         TEXT NOT NULL,
+      scopes        TEXT NOT NULL,
+      expires_at    INTEGER NOT NULL
+    )
+  `);
+}
+
+/**
+ * The persisted Streamer Twitch OAuth credentials (singleton). `expires_at` is
+ * epoch milliseconds; `scopes` is the space-joined scope list as Twitch returns it.
+ */
+export interface TwitchAuth {
+  access_token: string;
+  refresh_token: string;
+  user_id: string;
+  login: string;
+  scopes: string;
+  expires_at: number;
 }
 
 /** A sensible default RoomConfig for a freshly-provisioned Room. */
@@ -115,4 +139,40 @@ export function recordClaim(userId: string, displayName: string): void {
 export function hasClaim(userId: string): boolean {
   const row = db().prepare('SELECT 1 FROM claims WHERE user_id = ?').get(userId);
   return row !== undefined;
+}
+
+/** Persist the Streamer's Twitch OAuth credentials as the singleton row. */
+export function saveTwitchAuth(rec: TwitchAuth): void {
+  db()
+    .prepare(
+      `INSERT INTO twitch_auth
+         (id, access_token, refresh_token, user_id, login, scopes, expires_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         access_token  = excluded.access_token,
+         refresh_token = excluded.refresh_token,
+         user_id       = excluded.user_id,
+         login         = excluded.login,
+         scopes        = excluded.scopes,
+         expires_at    = excluded.expires_at`,
+    )
+    .run(
+      rec.access_token,
+      rec.refresh_token,
+      rec.user_id,
+      rec.login,
+      rec.scopes,
+      rec.expires_at,
+    );
+}
+
+/** Load the stored Streamer Twitch OAuth credentials, or null if none saved yet. */
+export function loadTwitchAuth(): TwitchAuth | null {
+  const row = db()
+    .prepare(
+      `SELECT access_token, refresh_token, user_id, login, scopes, expires_at
+       FROM twitch_auth WHERE id = 1`,
+    )
+    .get() as TwitchAuth | undefined;
+  return row ?? null;
 }

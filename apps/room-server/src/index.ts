@@ -25,7 +25,7 @@ import { loadConfig as loadRoomConfig, migrate, openDb, recordClaim } from './db
 import { Room } from './room.js';
 import { WsHub } from './net/ws.js';
 import { configRoutes } from './routes/config.js';
-import { oauthRoutes } from './twitch/oauth.js';
+import { getValidAccessToken, oauthRoutes } from './twitch/oauth.js';
 import { HubClient } from './hub-client.js';
 import {
   EventSubChatSource,
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   };
   const chatSource: ChatSource = config.mockChat
     ? new MockChatSource(onChat)
-    : new EventSubChatSource(onChat);
+    : new EventSubChatSource(onChat, getValidAccessToken);
   await chatSource.start();
 
   // Idle-despawn sweep: drop avatars that have gone quiet (see Room.tick). Runs

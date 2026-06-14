@@ -15,9 +15,22 @@ import { WebSocket } from 'ws';
 import type { ChatMessage } from '@twitch-room/protocol';
 
 import { config } from '../config.js';
+import { parseChatMessage, type ChatMessageEvent } from './chat-parse.js';
+
+// Re-export the pure parser + event shapes (defined in chat-parse.ts so they are
+// testable without this module's config side effects).
+export { parseChatMessage } from './chat-parse.js';
+export type { ChatMessageEvent, ChatMessageFragment } from './chat-parse.js';
 
 /** Callback invoked for every normalized chat message. */
 export type OnChat = (msg: ChatMessage) => void;
+
+/**
+ * Resolves a currently-valid Twitch user access token + the broadcaster user id,
+ * or null when the Streamer has not authenticated yet. Injected so the EventSub
+ * source stays decoupled from the OAuth/token store (see twitch/oauth.ts).
+ */
+export type TokenAccessor = () => Promise<{ accessToken: string; userId: string } | null>;
 
 /** A source of chat messages feeding the Room (real Twitch or a mock). */
 export interface ChatSource {
@@ -27,6 +40,12 @@ export interface ChatSource {
 
 const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const HELIX_SUBSCRIPTIONS_URL = 'https://api.twitch.tv/helix/eventsub/subscriptions';
+
+/** How often to retry acquiring a token before the Streamer has authenticated. */
+const TOKEN_RETRY_MS = 15_000;
+/** Reconnect backoff bounds after an unexpected socket close. */
+const RECONNECT_MIN_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
 
 /* ------------------------------------------------------------------ *
  * Minimal shapes of the EventSub frames we consume.
@@ -52,25 +71,6 @@ interface EventSubFrame {
   };
 }
 
-/** The `channel.chat.message` event payload (subset we map). */
-interface ChatMessageEvent {
-  message_id: string;
-  broadcaster_user_id: string;
-  chatter_user_id: string;
-  chatter_user_login: string;
-  chatter_user_name: string;
-  color?: string;
-  message: {
-    text: string;
-    fragments: Array<{
-      type: string;
-      text: string;
-      emote?: { id: string } | null;
-    }>;
-  };
-  badges: Array<{ set_id: string; id: string }>;
-}
-
 /**
  * EventSub-backed chat source. Maintains the WebSocket lifecycle and translates
  * `channel.chat.message` notifications into `ChatMessage`.
@@ -79,18 +79,72 @@ export class EventSubChatSource implements ChatSource {
   private socket: WebSocket | undefined;
   private sessionId: string | undefined;
   private stopped = false;
+  /** Token + broadcaster id for the current session, captured on connect. */
+  private auth: { accessToken: string; userId: string } | undefined;
+  /** Pending timer for token retry / reconnect backoff. */
+  private timer: NodeJS.Timeout | undefined;
+  /** Current reconnect backoff (doubles up to RECONNECT_MAX_MS). */
+  private backoffMs = RECONNECT_MIN_MS;
 
-  constructor(private readonly onChat: OnChat) {}
+  constructor(
+    private readonly onChat: OnChat,
+    private readonly getToken: TokenAccessor,
+  ) {}
 
   start(): void {
     this.stopped = false;
-    this.connect();
+    void this.connectWithToken();
   }
 
   stop(): void {
     this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
     this.socket?.close();
     this.socket = undefined;
+  }
+
+  /**
+   * Acquire a token, then connect. If no token is available yet (the Streamer
+   * has not authenticated), log a clear message and retry periodically rather
+   * than crashing.
+   */
+  private async connectWithToken(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+    let auth: { accessToken: string; userId: string } | null;
+    try {
+      auth = await this.getToken();
+    } catch (err) {
+      console.error('[eventsub] token lookup failed:', err instanceof Error ? err.message : err);
+      auth = null;
+    }
+    if (!auth) {
+      console.warn(
+        `[eventsub] no Twitch token yet — the streamer must visit /auth/twitch/login; ` +
+          `retrying in ${TOKEN_RETRY_MS / 1000}s`,
+      );
+      this.scheduleRetry(TOKEN_RETRY_MS);
+      return;
+    }
+    this.auth = auth;
+    this.connect();
+  }
+
+  private scheduleRetry(delayMs: number): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.timer) {
+      clearTimeout(this.timer);
+    }
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.connectWithToken();
+    }, delayMs);
   }
 
   private connect(url: string = EVENTSUB_WS_URL): void {
@@ -120,9 +174,11 @@ export class EventSubChatSource implements ChatSource {
       if (this.stopped) {
         return;
       }
-      // TODO: honor session_reconnect's reconnect_url and use proper backoff.
-      console.warn('[eventsub] socket closed; reconnecting in 5s');
-      setTimeout(() => this.connect(), 5000);
+      // Re-acquire a token (it may have expired) and reconnect with backoff.
+      const delay = this.backoffMs;
+      this.backoffMs = Math.min(this.backoffMs * 2, RECONNECT_MAX_MS);
+      console.warn(`[eventsub] socket closed; reconnecting in ${delay}ms`);
+      this.scheduleRetry(delay);
     });
   }
 
@@ -135,6 +191,8 @@ export class EventSubChatSource implements ChatSource {
           return;
         }
         this.sessionId = id;
+        // A successful welcome means the connection is healthy; reset backoff.
+        this.backoffMs = RECONNECT_MIN_MS;
         console.log('[eventsub] session established:', id);
         void this.createSubscription(id);
         break;
@@ -143,13 +201,24 @@ export class EventSubChatSource implements ChatSource {
         // Connection is healthy; nothing to do. Absence over the keepalive
         // window is what would signal a dead connection.
         break;
-      case 'session_reconnect':
-        // TODO: reconnect to payload.session.reconnect_url without dropping subs.
+      case 'session_reconnect': {
+        // Twitch is migrating us to a new edge; reconnect to the provided URL
+        // (the new socket re-issues session_welcome, after which we re-subscribe).
+        const reconnectUrl = frame.payload.session?.reconnect_url;
         console.warn('[eventsub] reconnect requested by Twitch');
+        if (reconnectUrl) {
+          // Open the new socket before closing the old one is ideal, but a simple
+          // swap is acceptable here: close the old, connect to the new URL.
+          const old = this.socket;
+          this.socket = undefined;
+          this.connect(reconnectUrl);
+          old?.close();
+        }
         break;
+      }
       case 'notification':
         if (frame.metadata.subscription_type === 'channel.chat.message' && frame.payload.event) {
-          this.onChat(toChatMessage(frame.payload.event));
+          this.onChat(parseChatMessage(frame.payload.event));
         }
         break;
       case 'revocation':
@@ -160,30 +229,19 @@ export class EventSubChatSource implements ChatSource {
 
   /**
    * Create the `channel.chat.message` subscription bound to this WebSocket
-   * session. Requires the Streamer's user access token (with `user:read:chat`)
-   * and the broadcaster + bot user ids resolved from their Twitch identity.
+   * session, using the Streamer's user access token and broadcaster user id.
    */
   private async createSubscription(sessionId: string): Promise<void> {
-    // TODO: acquire a valid Twitch user access token from the OAuth/token store
-    // (see twitch/oauth.ts) instead of a placeholder. Refresh if expired.
-    const userToken = '';
-    // TODO: resolve broadcaster_user_id and user_id (the reader) for `config.channel`
-    // via Helix /users; these are required by channel.chat.message conditions.
-    const broadcasterUserId = '';
-    const readerUserId = '';
-
-    if (!userToken || !broadcasterUserId || !readerUserId) {
-      console.warn(
-        '[eventsub] missing Twitch credentials/ids; subscription not created (configure OAuth)',
-      );
+    const auth = this.auth;
+    if (!auth) {
+      console.warn('[eventsub] no token captured for session; cannot subscribe');
       return;
     }
-
     try {
       const res = await fetch(HELIX_SUBSCRIPTIONS_URL, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${userToken}`,
+          Authorization: `Bearer ${auth.accessToken}`,
           'Client-Id': config.twitchClientId,
           'Content-Type': 'application/json',
         },
@@ -191,8 +249,8 @@ export class EventSubChatSource implements ChatSource {
           type: 'channel.chat.message',
           version: '1',
           condition: {
-            broadcaster_user_id: broadcasterUserId,
-            user_id: readerUserId,
+            broadcaster_user_id: auth.userId,
+            user_id: auth.userId,
           },
           transport: { method: 'websocket', session_id: sessionId },
         }),
@@ -206,35 +264,6 @@ export class EventSubChatSource implements ChatSource {
       console.error('[eventsub] subscription POST error:', err);
     }
   }
-}
-
-/** Normalize a Twitch `channel.chat.message` event into the protocol shape. */
-function toChatMessage(ev: ChatMessageEvent): ChatMessage {
-  let cursor = 0;
-  const emotes = ev.message.fragments.flatMap((f) => {
-    const start = cursor;
-    cursor += f.text.length;
-    if (f.type === 'emote' && f.emote) {
-      return [{ id: f.emote.id, name: f.text, start, end: cursor - 1 }];
-    }
-    return [];
-  });
-
-  const msg: ChatMessage = {
-    id: ev.message_id,
-    channelId: ev.broadcaster_user_id,
-    userId: ev.chatter_user_id,
-    username: ev.chatter_user_login,
-    displayName: ev.chatter_user_name,
-    text: ev.message.text,
-    emotes,
-    badges: ev.badges.map((b) => ({ setId: b.set_id, id: b.id })),
-    timestamp: Date.now(),
-  };
-  if (ev.color && ev.color.startsWith('#')) {
-    msg.color = ev.color as ChatMessage['color'];
-  }
-  return msg;
 }
 
 /* ------------------------------------------------------------------ *
